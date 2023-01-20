@@ -14,19 +14,19 @@ namespace Medallion;
 [AsyncMethodBuilder(typeof(RecursiveMethodBuilder<>))]
 public readonly ref struct Recursive<TResult>
 {
-    private readonly StateMachineBox _box;
+    private readonly RecursiveStackFrame _frame;
     
-    internal Recursive(StateMachineBox box)
+    internal Recursive(RecursiveStackFrame frame)
     {
-        this._box = box;
+        this._frame = frame;
     }
 
     public TResult GetResult()
     {
-        if (this._box.HasResult) { return this._box.Result!; }
+        if (this._frame.HasResult) { return this._frame.Result!; }
         
-        Medallion.StateMachineBox? prevBox = null;
-        Medallion.StateMachineBox currentBox = this._box;
+        Medallion.RecursiveStackFrame? prevBox = null;
+        Medallion.RecursiveStackFrame currentBox = this._frame;
         while (true)
         {
             currentBox.MoveNext();
@@ -35,7 +35,7 @@ public readonly ref struct Recursive<TResult>
             {
                 if (prevBox is null)
                 {
-                    Debug.Assert(currentBox == this._box);
+                    Debug.Assert(currentBox == this._frame);
                     break;
                 }
 
@@ -53,24 +53,24 @@ public readonly ref struct Recursive<TResult>
             }
         }
 
-        Debug.Assert(this._box.HasResult);
-        return this._box.Result!;
+        Debug.Assert(this._frame.HasResult);
+        return this._frame.Result!;
     }
 
-    public Awaiter GetAwaiter() => new(this._box);
+    public Awaiter GetAwaiter() => new(this._frame);
 
     public readonly struct Awaiter : INotifyCompletion, IRecursiveAwaiter
     {
-        private readonly StateMachineBox _box;
+        private readonly RecursiveStackFrame _frame;
 
-        internal Awaiter(StateMachineBox box) { this._box = box; }
+        internal Awaiter(RecursiveStackFrame box) { this._frame = box; }
 
         public bool IsCompleted => false;
 
         public TResult GetResult()
         {
-            Debug.Assert(this._box.HasResult);
-            return this._box.Result!;
+            Debug.Assert(this._frame.HasResult);
+            return this._frame.Result!;
         }
 
         // todo explicit impl & good error message
@@ -78,10 +78,11 @@ public readonly ref struct Recursive<TResult>
             throw new NotSupportedException();
 
         public void OnCompleted<TNextResult>(ref RecursiveMethodBuilder<TNextResult> methodBuilder) =>
-            methodBuilder.Task._box.Next = this._box;
+            methodBuilder.Task._frame.Next = this._frame;
     }
 
-    internal abstract class StateMachineBox : Medallion.StateMachineBox
+    // todo either don't nest these or nest the builder
+    internal abstract class RecursiveStackFrame : Medallion.RecursiveStackFrame
     {
         [MaybeNull]
         private TResult _result;
@@ -99,7 +100,7 @@ public readonly ref struct Recursive<TResult>
         }
     }
 
-    internal sealed class StateMachineBox<TStateMachine> : StateMachineBox
+    internal sealed class RecursiveStackFrame<TStateMachine> : RecursiveStackFrame
         where TStateMachine : IAsyncStateMachine
     {
         [MaybeNull]
@@ -113,9 +114,9 @@ public readonly ref struct Recursive<TResult>
     }
 }
 
-internal abstract class StateMachineBox
+internal abstract class RecursiveStackFrame
 {
-    public StateMachineBox? Next { get; set; }
+    public RecursiveStackFrame? Next { get; set; }
 
     public bool HasResult { get; protected set; }
 
@@ -130,20 +131,23 @@ public interface IRecursiveAwaiter
 public struct RecursiveMethodBuilder<TResult>
 {
     [MaybeNull]
-    private Recursive<TResult>.StateMachineBox _box;
+    private Recursive<TResult>.RecursiveStackFrame _frame;
 
     public static RecursiveMethodBuilder<TResult> Create() => new();
 
     public void SetStateMachine(IAsyncStateMachine stateMachine) => throw new NotSupportedException();
-    public void SetResult(TResult result) => this._box.Result = result;
+    public void SetResult(TResult result) => this._frame.Result = result;
     public void SetException(Exception exception) => ExceptionDispatchInfo.Capture(exception).Throw();
 
     public void Start<TStateMachine>(ref TStateMachine stateMachine) where TStateMachine : IAsyncStateMachine
     {
-        Debug.Assert(this._box is null);
-        var box = new Recursive<TResult>.StateMachineBox<TStateMachine>();
-        this._box = box; // must come before we put the state machine in the box!
-        box.StateMachine = stateMachine;
+        Debug.Assert(this._frame is null);
+        var frame = new Recursive<TResult>.RecursiveStackFrame<TStateMachine>();
+        // NOTE: since this is a member of the state machine and the state machine will be a value type
+        // in release builds, this line implicitly updates the state machine. Therefore, it must come before
+        // we copy the state machine into the frame!
+        this._frame = frame;
+        frame.StateMachine = stateMachine;
     }
 
     public void AwaitOnCompleted<TAwaiter, TStateMachine>(
@@ -153,7 +157,7 @@ public struct RecursiveMethodBuilder<TResult>
         where TStateMachine : IAsyncStateMachine
     {
         Debug.Assert(
-            this._box is Recursive<TResult>.StateMachineBox<TStateMachine> typedBox
+            this._frame is Recursive<TResult>.RecursiveStackFrame<TStateMachine> typedBox
                 && (
                     typeof(TStateMachine).IsValueType
                         ? Unsafe.AreSame(ref stateMachine, ref typedBox.StateMachine)
@@ -171,5 +175,5 @@ public struct RecursiveMethodBuilder<TResult>
         where TStateMachine : IAsyncStateMachine =>
         this.AwaitOnCompleted(ref awaiter, ref stateMachine);
 
-    public Recursive<TResult> Task => new(this._box);
+    public Recursive<TResult> Task => new(this._frame);
 }

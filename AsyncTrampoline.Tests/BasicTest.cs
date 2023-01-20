@@ -4,42 +4,126 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Tasks;
 
-namespace AsyncTrampoline.Tests
+namespace AsyncTrampoline.Tests;
+
+public class BasicTest
 {
-    public class BasicTest
+    [Test]
+    public void FibTest()
     {
-        [Test]
-        public void FibTest()
-        {
-            Assert.AreEqual(55, Fib(10).GetAwaiter().GetResult());
+        Assert.AreEqual(55, Fib(10).GetAwaiter().GetResult());
 
-            async RecursiveTask<long> Fib(long n) => n switch
+        async RecursiveTask<long> Fib(long n) => n switch
+        {
+            0 => 0,
+            1 => 1,
+            _ => await Fib(n - 1) + await Fib(n - 2)
+        };
+    }
+
+    [Test]
+    public void TestDeepRecursion()
+    {
+        // idea:can't capture state machine in start(); that's too early
+
+        Assert.AreEqual("hi", Count(100000).GetResult());
+
+        async RecursiveTask<string> Count(int n)
+        {
+            if (n <= 0)
             {
-                0 => 0,
-                1 => 1,
-                _ => await Fib(n - 1) + await Fib(n - 2)
-            };
+                return "hi";
+            }
+
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+
+            return await Count(n - 1);
         }
+    }
 
-        [Test]
-        public void TestDeepRecursion()
+    [Test]
+    public void Repro()
+    {
+        Foo(10).GetAwaiter().GetResult(); // throws "no state set"
+
+        async MyTask<string> Foo(int n) =>
+            n <= 0 ? "bar" : await Foo(n - 1);
+    }
+
+    [Test]
+    public void Test()
+    {
+        var vt = Do(10);
+        Console.WriteLine(vt.IsCompleted);
+	        var b = GC.GetAllocatedBytesForCurrentThread();
+        vt = Do(100);
+        Console.WriteLine(GC.GetAllocatedBytesForCurrentThread() - b);
+    }
+
+    private static async Task Do(int i)
+    {
+        if (i == 0) { return; }
+
+        await Do(i - 1);
+    }
+
+    [Test]
+    public void Sandbox()
+    {
+        Assert.AreEqual(55, Fib(10).GetResult());
+
+        async Recursive<long> Fib(long n) => n switch
         {
-            // idea:can't capture state machine in start(); that's too early
+            0 => 0,
+            1 => 1,
+            _ => await Fib(n - 1) + await Fib(n - 2)
+        };
+    }
 
-            Assert.AreEqual("hi", Count(100000).GetResult());
+    [Test]
+    public void TestDeepRecursion2()
+    {
+        Assert.AreEqual("hi", Count(100000).GetResult());
 
-            async RecursiveTask<string> Count(int n)
+        async Recursive<string> Count(int n)
+        {
+            if (n <= 0)
+            {
+                return "hi";
+            }
+
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+
+            return await Count(n - 1);
+        }
+    }
+
+    [Test]
+    public void TestDeepThrow()
+    {
+        var count = 0;
+
+        var exception = Assert.Throws<InvalidOperationException>(() => Throw(100000).GetResult());
+        Assert.AreEqual("hi", exception.Message);
+        Assert.AreEqual(0, count);
+        
+        async Recursive<long> Throw(int n)
+        {
+            ++count;
+            try
             {
                 if (n <= 0)
                 {
-                    return "hi";
+                    throw new InvalidOperationException("hi");
                 }
 
                 RuntimeHelpers.EnsureSufficientExecutionStack();
 
-                return await Count(n - 1);
+                return await Throw(n - 1);
             }
+            finally { --count; }
         }
     }
 }

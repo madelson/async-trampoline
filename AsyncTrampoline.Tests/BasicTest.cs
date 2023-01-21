@@ -1,6 +1,7 @@
 ﻿using Medallion;
 using NUnit.Framework;
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
@@ -32,6 +33,31 @@ public class BasicTest
     }
 
     [Test]
+    public void TestGarbageCollection()
+    {
+        Dictionary<int, WeakReference> weakReferences = new();
+        Bar(10).GetResult();
+
+        async Recursive<int> Bar(int i)
+        {
+            object @object = new();
+            weakReferences.Add(i, new(@object));
+
+            if (i <= 0)
+            {
+                return 1;
+            }
+
+            var result = await Bar(i - 1);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            Assert.IsFalse(weakReferences[i - 1].IsAlive);
+            Assert.IsTrue(weakReferences[i].IsAlive);
+            return result + @object.GetHashCode();
+        }
+    }
+
+    [Test]
     public void TestDeepRecursion()
     {
         Assert.AreEqual("hi", Count(100000).GetResult());
@@ -49,6 +75,9 @@ public class BasicTest
         }
     }
 
+    /// <summary>
+    /// Without our stack trace truncation, this takes forever to finish due to O(n^2) string concat
+    /// </summary>
     [Test]
     public void TestDeepThrow()
     {

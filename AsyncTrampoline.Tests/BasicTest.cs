@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace AsyncTrampoline.Tests;
@@ -105,11 +106,13 @@ public class BasicTest
     {
         var count = 0;
 
-        var exception = Assert.Throws<InvalidOperationException>(() => Throw(100000).GetResult());
-        Assert.AreEqual("hi", exception.Message);
+        var exception = Assert.Throws<InvalidOperationException>(() => RecursiveMethodThatThrows(100000).GetResult());
         Assert.AreEqual(0, count);
-        
-        async Recursive<long> Throw(int n)
+        Assert.AreEqual("hi", exception.Message);
+        Assert.AreEqual(1, Regex.Matches(exception.StackTrace, "ThrowRecursiveExceptionWithTruncatedStackTrace").Count, exception.StackTrace);
+        Assert.AreEqual(10, Regex.Matches(exception.StackTrace, nameof(RecursiveMethodThatThrows)).Count, exception.StackTrace);
+
+        async Recursive<long> RecursiveMethodThatThrows(int n)
         {
             ++count;
             try
@@ -121,7 +124,7 @@ public class BasicTest
 
                 RuntimeHelpers.EnsureSufficientExecutionStack();
 
-                return await Throw(n - 1);
+                return await RecursiveMethodThatThrows(n - 1);
             }
             finally { --count; }
         }

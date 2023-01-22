@@ -12,7 +12,7 @@ public class BasicTest
     [Test]
     public void FibTest()
     {
-        Assert.AreEqual(55, Fib(10).GetResult());
+        Assert.AreEqual(55, Recursive.Run(Fib(10)));
 
         async Recursive<long> Fib(long n) => n switch
         {
@@ -26,7 +26,7 @@ public class BasicTest
     [Test]
     public void ReproOldCSharpBug()
     {
-        Assert.AreEqual("bar", Foo(10).GetResult());
+        Assert.AreEqual("bar", Recursive.Run(Foo(10)));
 
         async Recursive<string> Foo(int n) =>
             n <= 0 ? "bar" : await Foo(n - 1);
@@ -36,7 +36,7 @@ public class BasicTest
     public void TestGarbageCollection()
     {
         Dictionary<int, WeakReference> weakReferences = new();
-        Bar(10).GetResult();
+        Bar(10).ComputeResult();
 
         async Recursive<int> Bar(int i)
         {
@@ -60,7 +60,7 @@ public class BasicTest
     [Test]
     public void TestDeepRecursion()
     {
-        Assert.AreEqual("hi", Count(100000).GetResult());
+        Assert.AreEqual("hi", Recursive.Run(Count(100000)));
 
         async Recursive<string> Count(int n)
         {
@@ -83,7 +83,7 @@ public class BasicTest
     {
         var count = 0;
 
-        var exception = Assert.Throws<InvalidOperationException>(() => RecursiveMethodThatThrows(100000).GetResult());
+        var exception = Assert.Throws<InvalidOperationException>(() => Recursive.Run(RecursiveMethodThatThrows(100000)));
         Assert.AreEqual(0, count);
         Assert.AreEqual("hi", exception.Message);
         Assert.AreEqual(1, Regex.Matches(exception.StackTrace, "ThrowRecursiveExceptionWithTruncatedStackTrace").Count, exception.StackTrace);

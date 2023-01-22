@@ -16,7 +16,7 @@ public readonly ref struct Recursive<TResult>
         this._frame = frame;
     }
 
-    public TResult GetResult()
+    internal TResult ComputeResult()
     {
         if (this._frame.State is RecursiveStackFrameState.Incomplete)
         {

@@ -2,5 +2,5 @@
 
 public ref struct Recursive
 {
-    public static TResult Run<TResult>(Recursive<TResult> recursive) => recursive.ComputeResult();
+    public static TResult Run<TResult>(Recursive<TResult> recursive) => recursive.GetResult();
 }

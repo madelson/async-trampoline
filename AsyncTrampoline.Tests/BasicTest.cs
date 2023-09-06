@@ -36,7 +36,7 @@ public class BasicTest
     public void TestGarbageCollection()
     {
         Dictionary<int, WeakReference> weakReferences = new();
-        Bar(10).ComputeResult();
+        Recursive.Run(Bar(10));
 
         async Recursive<int> Bar(int i)
         {

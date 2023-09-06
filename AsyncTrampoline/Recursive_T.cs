@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -16,45 +17,52 @@ public readonly ref struct Recursive<TResult>
         this._frame = frame;
     }
 
-    internal TResult ComputeResult()
+    internal TResult GetResult()
     {
         if (this._frame.State is RecursiveStackFrameState.Incomplete)
         {
-            Medallion.RecursiveStackFrame? prevBox = null;
-            Medallion.RecursiveStackFrame currentBox = this._frame;
-            while (true)
-            {
-                currentBox.MoveNext();
-
-                if (currentBox.State != RecursiveStackFrameState.Incomplete)
-                {
-                    if (prevBox is null)
-                    {
-                        Debug.Assert(currentBox == this._frame);
-                        break;
-                    }
-
-                    currentBox = prevBox;
-                    prevBox = (RecursiveStackFrame)prevBox.Value!; // back pointer
-                }
-                else
-                {
-                    Debug.Assert(currentBox.Value is not null);
-                    Debug.Assert(currentBox.Value != prevBox);
-                    var nextBox = (RecursiveStackFrame)currentBox.Value;
-                    currentBox.SetValue(prevBox); // set up back pointer
-                    prevBox = currentBox;
-                    currentBox = nextBox!;
-                }
-            }
+            this.ComputeResult();
         }
 
         Debug.Assert(this._frame.State != RecursiveStackFrameState.Incomplete);
         return this._frame.GetResult(isOuterResult: true);
     }
 
+    private void ComputeResult()
+    {
+        Medallion.RecursiveStackFrame? prevBox = null;
+        Medallion.RecursiveStackFrame currentBox = this._frame;
+        while (true)
+        {
+            currentBox.MoveNext();
+
+            if (currentBox.State != RecursiveStackFrameState.Incomplete)
+            {
+                if (prevBox is null)
+                {
+                    Debug.Assert(currentBox == this._frame);
+                    break;
+                }
+
+                currentBox = prevBox;
+                prevBox = (RecursiveStackFrame)prevBox.Value!; // back pointer
+            }
+            else
+            {
+                Debug.Assert(currentBox.Value is not null);
+                Debug.Assert(currentBox.Value != prevBox);
+                var nextBox = (RecursiveStackFrame)currentBox.Value;
+                currentBox.SetValue(prevBox); // set up back pointer
+                prevBox = currentBox;
+                currentBox = nextBox!;
+            }
+        }
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public Awaiter GetAwaiter() => new(this._frame);
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public readonly struct Awaiter : INotifyCompletion, IRecursiveAwaiter
     {
         private readonly RecursiveStackFrame _frame;
@@ -66,8 +74,7 @@ public readonly ref struct Recursive<TResult>
         [StackTraceHidden]
         public TResult GetResult() => this._frame.GetResult(isOuterResult: false);
 
-        // todo explicit impl & good error message
-        public void OnCompleted(Action action) =>
+        void INotifyCompletion.OnCompleted(Action action) =>
             throw new NotSupportedException();
 
         public void OnCompleted<TNextResult>(ref RecursiveMethodBuilder<TNextResult> methodBuilder) =>
@@ -104,8 +111,7 @@ public readonly ref struct Recursive<TResult>
             switch (this.State)
             {
                 case RecursiveStackFrameState.Incomplete:
-                    // todo revisit with finalized API
-                    throw new InvalidOperationException($"The result has not been computed yet. Did you mean to call {nameof(Recursive<TResult>)}<{nameof(TResult)}>.GetResult()?");
+                    throw new InvalidOperationException($"The result has not been computed yet. Did you mean to await the instance or call {nameof(Recursive)}.{nameof(Recursive.Run)}()?");
                 case RecursiveStackFrameState.Faulted:
                     RecursiveExceptionHelper.Throw((Exception)this.Value!, isFinalThrow: isOuterResult);
                     break;
@@ -217,43 +223,4 @@ public struct RecursiveMethodBuilder<TResult>
         this.AwaitOnCompleted(ref awaiter, ref stateMachine);
 
     public Recursive<TResult> Task => new(this._frame);
-}
-
-internal static class RecursiveExceptionHelper
-{
-    private const int MaxThrowCount = 10;
-
-    private static readonly ConditionalWeakTable<Exception, ExceptionState> ExceptionStates = new();
-
-    [StackTraceHidden]
-    public static void Throw(Exception exception, bool isFinalThrow = false)
-    {
-        var state = ExceptionStates.GetValue(exception, static _ => new());
-
-        if (state.TruncatedDispatchInfo != null)
-        {
-            if (isFinalThrow)
-            {
-                ThrowRecursiveExceptionWithTruncatedStackTrace(state.TruncatedDispatchInfo);
-            }
-            state.TruncatedDispatchInfo.Throw();
-        }
-
-        var dispatchInfo = ExceptionDispatchInfo.Capture(exception);
-        if (++state.ThrowCount >= MaxThrowCount)
-        {
-            state.TruncatedDispatchInfo = dispatchInfo;
-        }
-        dispatchInfo.Throw();
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)] // we want this visible in the trace
-    private static void ThrowRecursiveExceptionWithTruncatedStackTrace(ExceptionDispatchInfo dispatchInfo) =>
-        dispatchInfo.Throw();
-
-    private sealed class ExceptionState
-    {
-        public int ThrowCount;
-        public ExceptionDispatchInfo? TruncatedDispatchInfo;
-    }
 }
